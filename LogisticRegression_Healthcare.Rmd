@@ -1,0 +1,192 @@
+---
+title: "Logistic Regression - Healthcare Quality Assessment"
+author: "Casandra Philipson"
+date: "February 26, 2016"
+output: html_document
+---
+
+## Overview: Healthcare Quality
+There is no single set of guidelines for defining quality of healthcare. Physicians are limited by memory and time and limited number of patients. This prject addresses a central question:  
+  
+_Can an analytical tool be developed that replicates expert assesments on a large scale?_  
+  
+Electronicically available claims data have a standardized format however they generally present discrepencies, experience under-reporting, and vauge material. Medical claims assess diagnosis, procedures, doctor/hospital info, and cost. Pharmacy claims assess drugs, quantity, doctor, cost. 
+  
+__Sample data for project:__  
+__Claims Sample:__ 131 randomly selected diabetes patients sampled froma large health insurance claims database. Age range from 35 to 55. Costs from $10,000 to $20,000. Data was obtained from a cohort period of 9/2003 to 8/2005.  
+__Variable Extraction:__
+  
+* Dependent variable:  
+    + Quality of care (0 = high-quality, 1 = low-quality)  
+* Independent variables:  
+    + Diabetes treatment  
+    + Patient demographics  
+    + Healthcare utilization  
+    + Providers  
+    + Claims  
+    + Prescriptions  
+  
+
+##Logistic Regression Model
+Since the dependent variable is binary, it is considered a _categorical variable_. Logistic regression is used to model this type of data. Specifically, logistic regression predicts _**the probability of the outcome**_, _P_(y = 1). 
+
+###Visualizing the data
+```{r}
+suppressMessages(library(ggplot2))
+quality <- read.csv("quality.csv")
+str(quality)
+
+ggplot(data = quality, aes(x = OfficeVisits, y = Narcotics)) +
+  geom_point(aes(color = factor(PoorCare)))
+```
+
+Looking at the data, it is hard to determine a trend between good care (red) veruss bad care (blue). However, it looks like more narcotics _and_ more office visits may result in worse care. How many patients received poor care?
+
+```{r}
+table(quality$PoorCare)
+```
+98 patients received good care whereas 33 patients received bad care. Therefore the baseline model accuracy is 98/131 (where good care is dominating).
+  
+  
+###Build the Dataset
+Randomly split data into _testing_ and _training_ sets  
+__Notes for splitting data__  
+  
+* Setting a seed allows reproducibility  
+* Indicate the variable that need to be well balanced between datasets in split function  
+* Look at 'split':  
+    + TRUE means put into training set  
+    + FALSE means put into testing set  
+
+```{r}
+suppressMessages(library(caTools))
+
+# Randomly split data
+set.seed(88) 
+
+# 75 percent of data goes to training
+split <- sample.split(quality$PoorCare, SplitRatio = 0.75)
+
+# Create training and testing sets
+qualityTrain <- subset(quality, split == TRUE)
+qualityTest <- subset(quality, split == FALSE)
+```
+
+###Build the Logistic Regression Model  
+__Notes__  
+Model <- glm(DependentVariable ~ IndependentVariable1 + IndependentVariable2 +..., data = dataTrain, family = binomial)  
+
+```{r}
+QualityLog <- glm(PoorCare ~ OfficeVisits + Narcotics, data = qualityTrain, family = binomial)
+summary(QualityLog)
+
+```
+__Summary of QualityLog Model:__  
+Coefficients for _OfficeVisits_ and _Narcotics_ are positive indicating that the higher incedence of either of these variables are indicative of worse care outcomes, as we hypothesized. Additionally, both variable coefficients have at least one * meaning they are significant in our model. Lastly, look at the AIC value, a quality measurement for our model adjusted for number of data point in the model. _Note that AIC can only be compared between models using the same dataset._ The AIC value can assist in model optimization (minimum AIC is best).
+  
+  
+### Make Predictions on Training Data Set
+```{r}
+predictTrain <- predict(QualityLog, type = "response")
+
+# Analyze predictions
+summary(predictTrain)
+tapply(predictTrain, qualityTrain$PoorCare, mean)
+```
+A __'1'__ indicates prediction for poor care. The model predicts a value of 0.439 for poor care incidences.
+
+***
+
+###Thresholding  
+Remember that the outcome of a logistic regression model is a probability. We want to predict a binary outcome: _"Did the patient receive good or poor care?"_.  
+  
+To select an optimal thrsshold value, t, determine which errors are "better". For example, if t is _large_ predicting poor care is rare and thus, the model will predict good care for more poor care issues. Another option is t = 0.5, where no preference is preferred and will predict the most likely outcome.  
+
+Build a __*classification matrix*__ to compare actual outcomes to predicted outcomes:  
+
+Matrix     | Predicted = 0        | Predicted = 1  
+---------- | -------------------- | --------------  
+Actual = 0 | True Negatives (TN)  | False Positives (FP)  
+Actual = 1 | False Negatives (FN) | True Positives (TP)  
+
+__Computing Outcome Measures__
+  
+* Overall accuracy = (TN + TP) / N  
+* Overall error rate = (FP + FN) / N  
+* Sensitivity = TP / (TP + FP)  
+* Specificity = TN / (TN + FP)  
+* False Negative Error Rate = FN / (TP + FN)  
+* False Positive Error Rate = FP / (TN + FP)   
+  
+
+```{r}
+# Confusion matrix for threshold of 0.5
+# Rows are true values whereas columns are predicted
+# 0 or FALSE = good care; 1 or TRUE = poor care
+table(qualityTrain$PoorCare, predictTrain > 0.5)
+```
+__Interpreting the matrix:__  
+For 70 cases we predict "good care" when patients truly had "good care".  
+Similarly for 10 cases we predict "poor care" when patients actually experienced "poor care".  
+In 15 cases we wrongly predict that patients had good care when they actually had poor care.  
+Lastly, 4 times we predict poor care when the patient had good care.
+  
+For this model:  
+__Sensitivity__ = 10/25 = 0.4  
+__Specificity__ = 70/74 = 0.95  
+  
+Altering the confusion matrix threshold changes the sensitivity & specificity
+```{r}
+table(qualityTrain$PoorCare, predictTrain > 0.7)
+```
+__Sensitivity__ = 8/25 = 0.32 (down from original t = 0.5)  
+__Specificity__ = 73/74 = 0.99 (up from original t = 0.5)
+
+```{r}
+table(qualityTrain$PoorCare, predictTrain > 0.2)
+```
+__Sensitivity__ = 16/25 = 0.64 (up from original t = 0.5)  
+__Specificity__ = 54/74 = 0.73 (down from original t = 0.5)  
+  
+***
+
+### Receiver Operator Characteristic (ROC) Curves
+Determining the best threshold is difficult. Using a ROC curve makes this process easier by capturing all thresholds simultaneously.  
+  
+* __High threshold__  
+    + High specificity  
+    + Low sensitivity  
+* __Low threshold__  
+    + Low specificity  
+    + High sensitivity  
+  
+Choose the best threshold based on the best _trade off_ (i.e. cost of failing to detect positives or cost of rising false alarms).  
+
+```{r}
+suppressMessages(library(ROCR))
+
+# Prediction function
+ROCRpred <- prediction(predictTrain, qualityTrain$PoorCare)
+
+# Performance function
+#tpr = true positive rate on y-axis
+ROCRperf <- performance(ROCRpred, "tpr", "fpr")
+
+# Plot ROC curve with threshold labels 
+plot(ROCRperf, colorize=TRUE, print.cutoffs.at=seq(0,1,by=0.1), text.adj=c(-0.2,1.7))
+```
+
+***
+
+###Conclusions and Model Interpretation  
+__Area under the curve (AUC)__  
+  
+* Area under ROC curve  
+* Interpretation: proportion of the time you guess correctly  
+* Maximum = 1 (perfect prediction)  
+  
+```{r}
+ROCRpred_AUC <- performance(ROCRpred, "auc")@y.values
+ROCRpred_AUC
+```
+__We built a model with an out-of-sample accuracy of ~ 77.4%.__  
